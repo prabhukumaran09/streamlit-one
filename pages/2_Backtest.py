@@ -163,32 +163,29 @@ def get_kite():
 
 # ─────────────────────────────────────────────
 # INSTRUMENTS + LIVE F&O UNIVERSE
-# Uses page-specific session keys so it never
-# conflicts with the main scanner page cache.
+# @st.cache_resource persists across reruns AND
+# across users/sessions for the lifetime of the
+# Streamlit worker — fetched only ONCE per deploy,
+# not once per user session. Fastest possible.
 # ─────────────────────────────────────────────
-_BT_NFO_KEY      = "__bt_nfo_df__"       # stores the DataFrame
-_BT_STOCKS_KEY   = "__bt_fno_stocks__"   # stores the list
-
 INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
                "BANKEX", "NIFTYNXT50", "NIFTY50", "CNXFINANCE"}
 
-def _load_instruments(kite):
+@st.cache_resource(ttl=86400)
+def _load_instruments_cached(api_key: str, access_token: str):
     """
-    Fetches NFO instruments once per session and stores them in
-    two separate, clearly-typed session state keys.
-    Always returns (pd.DataFrame, list) — never raises.
+    Fetches NFO instruments using explicit string args (not kite object)
+    so cache_resource can hash them reliably.
+    Cached for 24 hours across ALL sessions and reruns.
+    Returns (nfo_df, fno_stocks_list).
     """
-    # Return cached if already loaded this session
-    if _BT_NFO_KEY in st.session_state and _BT_STOCKS_KEY in st.session_state:
-        return st.session_state[_BT_NFO_KEY], st.session_state[_BT_STOCKS_KEY]
-
     try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
         nfo_df = pd.DataFrame(kite.instruments("NFO"))
         if nfo_df.empty:
-            st.session_state[_BT_NFO_KEY]    = pd.DataFrame()
-            st.session_state[_BT_STOCKS_KEY] = []
             return pd.DataFrame(), []
-
         opt_stocks = sorted(
             nfo_df[
                 (nfo_df["segment"] == "NFO-OPT") &
@@ -196,22 +193,19 @@ def _load_instruments(kite):
                 (~nfo_df["name"].isin(INDEX_NAMES))
             ]["name"].dropna().unique().tolist()
         )
-        st.session_state[_BT_NFO_KEY]    = nfo_df
-        st.session_state[_BT_STOCKS_KEY] = opt_stocks
         return nfo_df, opt_stocks
-
     except Exception as e:
         st.error(f"Instrument fetch error: {e}")
         return pd.DataFrame(), []
 
-# Public helpers — always safe to call
 def fetch_instruments(kite):
-    """Returns (nfo_df, fno_stocks_list)."""
-    return _load_instruments(kite)
+    """Returns (nfo_df, fno_stocks_list). Uses persistent cache."""
+    api_key, access_token = get_credentials()
+    return _load_instruments_cached(api_key, access_token)
 
 def get_fno_stocks(kite) -> list:
     """Returns live F&O stock universe as a sorted list."""
-    _, stocks = _load_instruments(kite)
+    _, stocks = fetch_instruments(kite)
     return stocks
 
 # ─────────────────────────────────────────────
@@ -467,8 +461,8 @@ def render_bt_table(df, opt_type):
         return "color: #ffd740; font-family: JetBrains Mono, monospace;"
 
     styled = df.style\
-        .applymap(style_ret, subset=["Return %"])\
-        .applymap(style_time, subset=["Breakout Time"])
+        .map(style_ret, subset=["Return %"])\
+        .map(style_time, subset=["Breakout Time"])
 
     st.dataframe(
         styled,
