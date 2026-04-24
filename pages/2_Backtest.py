@@ -247,20 +247,43 @@ def backtest_stock(kite, nfo_df, symbol: str, bt_date: date) -> list:
     try:
         # ── 1. Stock open on bt_date ──────────────────────────────────────
         from_dt  = datetime.combine(bt_date, datetime.min.time())
-        to_dt    = from_dt + timedelta(hours=10)  # up to ~7:30pm covers full day
+        to_dt    = from_dt + timedelta(hours=10)
         try:
-            # Get daily candle for bt_date to extract open
-            nse_instruments = kite.instruments("NSE")
-            nse_df = pd.DataFrame(nse_instruments)
-            nse_row = nse_df[(nse_df["tradingsymbol"] == symbol) & (nse_df["segment"] == "NSE")]
-            if nse_row.empty:
+            # ── Get stock open via NSE EQ token ──────────────────────────
+            # We look it up from nfo_df's futures to avoid a separate
+            # NSE instruments call — more reliable on historical data API.
+            fut_rows = nfo_df[
+                (nfo_df["name"] == symbol) &
+                (nfo_df["segment"] == "NFO-FUT")
+            ].copy()
+            if fut_rows.empty:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{symbol}: no futures found in NFO instruments")
                 return rows
-            nse_token = int(nse_row.iloc[0]["instrument_token"])
-            day_hist = kite.historical_data(nse_token, from_date=from_dt, to_date=to_dt, interval="day")
+
+            fut_rows["expiry"] = pd.to_datetime(fut_rows["expiry"]).dt.date
+            fut_expiry = nearest_expiry_for_date(fut_rows["expiry"].unique().tolist(), bt_date)
+            if not fut_expiry:
+                return rows
+
+            fut_token = int(fut_rows[fut_rows["expiry"] == fut_expiry].iloc[0]["instrument_token"])
+
+            # Fetch daily candle for bt_date using futures token
+            day_hist = kite.historical_data(
+                fut_token,
+                from_date=from_dt,
+                to_date=to_dt,
+                interval="day"
+            )
             if not day_hist:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{symbol}: no daily candle data for {bt_date}")
                 return rows
             stock_open = day_hist[0]["open"]
-        except Exception:
+
+        except Exception as e:
+            st.session_state.setdefault("bt_errors", []).append(
+                f"{symbol}: stock open fetch failed — {e}")
             return rows
 
         # ── 2. NFO options for this symbol ───────────────────────────────
@@ -311,10 +334,14 @@ def backtest_stock(kite, nfo_df, symbol: str, bt_date: date) -> list:
                     to_date=prev_to,
                     interval="15minute"
                 )
-            except Exception:
+            except Exception as e:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{tradingsymbol}: prev-day candles failed — {e}")
                 continue
 
             if not prev_candles:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{tradingsymbol}: no prev-day candles for {prev_day}")
                 continue
 
             last_prev = prev_candles[-1]   # last candle of previous day
@@ -332,10 +359,14 @@ def backtest_stock(kite, nfo_df, symbol: str, bt_date: date) -> list:
                     to_date=bt_to,
                     interval="15minute"
                 )
-            except Exception:
+            except Exception as e:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{tradingsymbol}: intraday candles failed — {e}")
                 continue
 
             if not bt_candles:
+                st.session_state.setdefault("bt_errors", []).append(
+                    f"{tradingsymbol}: no intraday candles for {bt_date}")
                 continue
 
             # ── Find first breakout candle ────────────────────────────────
@@ -382,8 +413,9 @@ def backtest_stock(kite, nfo_df, symbol: str, bt_date: date) -> list:
                     "_type":          opt_type,
                 })
 
-    except Exception:
-        pass
+    except Exception as e:
+        st.session_state.setdefault("bt_errors", []).append(
+            f"{symbol}: unexpected error — {e}")
 
     return rows
 
@@ -391,6 +423,8 @@ def backtest_stock(kite, nfo_df, symbol: str, bt_date: date) -> list:
 # FULL BACKTEST SCAN
 # ─────────────────────────────────────────────
 def run_backtest(kite, bt_date: date) -> dict:
+    # Clear previous error log
+    st.session_state["bt_errors"] = []
     nfo_df, fno_stocks = fetch_instruments(kite)
     if nfo_df.empty:
         return {"CE": [], "PE": []}
@@ -724,3 +758,11 @@ else:
         if pe_no:
             with st.expander(f"📋 PE — No Breakout ({len(pe_no)} stocks)", expanded=False):
                 render_bt_table(build_df(pe_no), "PE")
+
+    # ── Debug: scan errors expander ─────────────────────────────────────
+    bt_errors = st.session_state.get("bt_errors", [])
+    if bt_errors:
+        with st.expander(f"⚠️ Scan warnings / skipped stocks ({len(bt_errors)})", expanded=False):
+            st.caption("These stocks were skipped during the backtest scan. Use this to debug missing results.")
+            for err in bt_errors:
+                st.text(err)
