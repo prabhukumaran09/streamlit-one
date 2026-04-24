@@ -270,15 +270,14 @@ def camarilla_r4(high: float, low: float, close: float) -> float:
 @st.cache_data(ttl=86400)
 def fetch_instruments(_kite):
     """
-    Returns NFO instrument DataFrame AND the live F&O stock universe.
-    F&O stocks = unique `name` values in NFO-OPT segment (stock options only,
-    excludes NIFTY/BANKNIFTY index options).
+    Returns (nfo_df, fno_universe_list).
+    Cached by Streamlit for 24 hours — uses _kite prefix so
+    Streamlit's cache treats it as an unhashed arg.
     """
     try:
         nfo_df = pd.DataFrame(_kite.instruments("NFO"))
         if nfo_df.empty:
             return nfo_df, []
-        # Stock options only: segment=NFO-OPT, instrument_type CE/PE, name not an index
         INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
                        "BANKEX", "NIFTYNXT50", "NIFTY50", "CNXFINANCE"}
         opt_stocks = nfo_df[
@@ -286,26 +285,17 @@ def fetch_instruments(_kite):
             (nfo_df["instrument_type"].isin(["CE", "PE"])) &
             (~nfo_df["name"].isin(INDEX_NAMES))
         ]["name"].dropna().unique().tolist()
-        fno_universe = sorted(opt_stocks)
-        return nfo_df, fno_universe
+        return nfo_df, sorted(opt_stocks)
     except Exception as e:
         st.error(f"Instrument fetch error: {e}")
         return pd.DataFrame(), []
 
 # ─────────────────────────────────────────────
 # FNO_STOCKS — loaded dynamically at runtime
-# Falls back to empty list before first kite init
 # ─────────────────────────────────────────────
-if "fno_stocks" not in st.session_state:
-    st.session_state["fno_stocks"] = []
-
 def get_fno_stocks(kite) -> list:
-    """Return cached F&O universe, fetching if needed."""
-    if st.session_state["fno_stocks"]:
-        return st.session_state["fno_stocks"]
+    """Return live F&O universe. Uses @st.cache_data via fetch_instruments."""
     _, universe = fetch_instruments(kite)
-    if universe:
-        st.session_state["fno_stocks"] = universe
     return universe
 
 # ─────────────────────────────────────────────
