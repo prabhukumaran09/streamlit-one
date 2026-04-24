@@ -105,46 +105,108 @@ html, body, [class*="css"] {
 /* ── Metric row ── */
 .metric-row { display:flex; gap:8px; margin-bottom:10px; }
 .metric-card {
-    background:#0a1120; border:1px solid #1e3a5f;
-    border-radius:6px; padding:8px 14px; flex:1; text-align:center;
+    background: linear-gradient(145deg, #1a2744 0%, #162038 100%) !important;
+    border: 1px solid #2e4a7a !important;
+    border-radius: 8px !important; padding: 10px 16px !important; flex:1; text-align:center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
 }
-.metric-label { font-size:0.6rem; color:#546e7a; letter-spacing:2px; text-transform:uppercase; margin-bottom:3px; }
-.metric-value { font-family:'JetBrains Mono',monospace; font-size:1.2rem; font-weight:700; }
-.c-ce      { color:#00e676; }
-.c-pe      { color:#ff5252; }
-.c-near    { color:#ffd740; }
-.c-total   { color:#4fc3f7; }
-.c-neutral { color:#90a4ae; font-size:0.95rem !important; }
+.metric-label {
+    font-size:0.68rem !important; color:#a0b8d8 !important;
+    letter-spacing:2px; text-transform:uppercase; margin-bottom:4px;
+    font-weight: 600 !important;
+}
+.metric-value { font-family:'JetBrains Mono',monospace; font-size:1.25rem !important; font-weight:700 !important; }
+.c-ce      { color:#00ff88 !important; text-shadow: 0 0 8px rgba(0,255,136,0.4); }
+.c-pe      { color:#ff6b6b !important; text-shadow: 0 0 8px rgba(255,107,107,0.4); }
+.c-near    { color:#ffd740 !important; text-shadow: 0 0 8px rgba(255,215,64,0.3); }
+.c-total   { color:#64d8ff !important; text-shadow: 0 0 8px rgba(100,216,255,0.3); }
+.c-neutral { color:#d0e0f0 !important; font-size:0.95rem !important; font-weight:600 !important; }
 
 /* ── Section labels ── */
 .sec-hdr {
-    padding:5px 14px; border-radius:4px;
-    font-family:'Rajdhani',sans-serif;
-    font-size:0.95rem; font-weight:700;
+    padding:6px 16px !important; border-radius:6px !important;
+    font-family:'Rajdhani',sans-serif !important;
+    font-size:0.95rem !important; font-weight:700 !important;
     letter-spacing:2px; text-transform:uppercase;
     margin-bottom:6px; margin-top:10px;
 }
-.hdr-ce-break  { background:linear-gradient(90deg,#002200,#0a150a); border-left:3px solid #00e676; color:#00e676; }
-.hdr-pe-break  { background:linear-gradient(90deg,#220000,#150a0a); border-left:3px solid #ff5252; color:#ff5252; }
-.hdr-ce-near   { background:linear-gradient(90deg,#1a1500,#120f00); border-left:3px solid #ffd740; color:#ffd740; }
-.hdr-pe-near   { background:linear-gradient(90deg,#1a1500,#120f00); border-left:3px solid #ffab40; color:#ffab40; }
+.hdr-ce-break  { background:linear-gradient(90deg,#003d1a,#001a0c) !important; border-left:3px solid #00ff88 !important; color:#00ff88 !important; }
+.hdr-pe-break  { background:linear-gradient(90deg,#3d0000,#1a0000) !important; border-left:3px solid #ff6b6b !important; color:#ff6b6b !important; }
+.hdr-ce-near   { background:linear-gradient(90deg,#3d3000,#1a1500) !important; border-left:3px solid #ffd740 !important; color:#ffd740 !important; }
+.hdr-pe-near   { background:linear-gradient(90deg,#3d3000,#1a1500) !important; border-left:3px solid #ffab40 !important; color:#ffab40 !important; }
 
 /* ── Divider ── */
-.divider { border:none; border-top:1px solid #1e3a5f; margin:8px 0; }
+.divider { border:none; border-top:1px solid #2e4a7a; margin:8px 0; }
 
 /* ── Dataframe ── */
-[data-testid="stDataFrame"] { border:1px solid #1e3a5f !important; border-radius:6px !important; overflow:hidden; }
+[data-testid="stDataFrame"] { border:1px solid #2e4a7a !important; border-radius:6px !important; overflow:hidden; }
 
-/* ── Sidebar ── */
-section[data-testid="stSidebar"] { background:#07090f !important; border-right:1px solid #1e3a5f; }
-section[data-testid="stSidebar"] .stTextInput input,
-section[data-testid="stSidebar"] .stNumberInput input,
-section[data-testid="stSidebar"] .stSelectbox div {
-    background:#0a1120 !important; color:#c8d6e5 !important;
-    border:1px solid #1e3a5f !important; font-family:'JetBrains Mono',monospace;
+/* ════════════════════════════════════════════
+   SIDEBAR — HIGH CONTRAST
+   ════════════════════════════════════════════ */
+section[data-testid="stSidebar"] {
+    background: #0f1e35 !important;
+    border-right: 2px solid #2e4a7a !important;
+}
+/* All text inside sidebar */
+section[data-testid="stSidebar"] * {
+    color: #c8dff5 !important;
+}
+/* Page nav links */
+section[data-testid="stSidebar"] a {
+    color: #64d8ff !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 1px !important;
+    text-decoration: none !important;
+}
+section[data-testid="stSidebar"] a:hover {
+    color: #ffffff !important;
+    background: rgba(100,216,255,0.12) !important;
+    border-radius: 6px;
+}
+/* Active page */
+section[data-testid="stSidebar"] [aria-current="page"],
+section[data-testid="stSidebar"] [aria-selected="true"] {
+    background: rgba(100,216,255,0.15) !important;
+    border-radius: 6px !important;
+    color: #ffffff !important;
+}
+/* Scanner Info title */
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h1 {
+    color: #64d8ff !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    letter-spacing: 2px !important;
+    font-weight: 700 !important;
+}
+/* Info text / caption */
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] small,
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: #b0c8e8 !important;
+    font-size: 0.82rem !important;
+    line-height: 1.6 !important;
+}
+/* Bold text inside captions */
+section[data-testid="stSidebar"] strong {
+    color: #ffd740 !important;
+    font-weight: 700 !important;
+}
+/* Inputs */
+section[data-testid="stSidebar"] input {
+    background: #1a2d48 !important;
+    color: #e0eeff !important;
+    border: 1px solid #2e4a7a !important;
 }
 section[data-testid="stSidebar"] label {
-    color:#78909c !important; font-size:0.75rem; letter-spacing:1px; text-transform:uppercase;
+    color: #a0c0e0 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    font-weight: 600 !important;
 }
 
 /* ── Buttons ── */
