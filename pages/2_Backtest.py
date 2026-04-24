@@ -162,47 +162,57 @@ def get_kite():
         return None
 
 # ─────────────────────────────────────────────
-# F&O UNIVERSE
+# INSTRUMENTS + LIVE F&O UNIVERSE
+# Uses page-specific session keys so it never
+# conflicts with the main scanner page cache.
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# INSTRUMENTS + LIVE F&O UNIVERSE (same logic as main app)
-# ─────────────────────────────────────────────
-# Instruments are cached using a fixed session key to avoid
-# cache-key collisions between get_fno_stocks and run_backtest.
-def fetch_instruments(kite):
+_BT_NFO_KEY      = "__bt_nfo_df__"       # stores the DataFrame
+_BT_STOCKS_KEY   = "__bt_fno_stocks__"   # stores the list
+
+INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
+               "BANKEX", "NIFTYNXT50", "NIFTY50", "CNXFINANCE"}
+
+def _load_instruments(kite):
     """
-    Fetches NFO instruments and derives live F&O stock universe.
-    Cached in session_state for 24 hours to avoid redundant API calls.
-    Returns: (nfo_df, fno_stocks_list)
+    Fetches NFO instruments once per session and stores them in
+    two separate, clearly-typed session state keys.
+    Always returns (pd.DataFrame, list) — never raises.
     """
-    cache_key = "bt_instruments_cache"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    # Return cached if already loaded this session
+    if _BT_NFO_KEY in st.session_state and _BT_STOCKS_KEY in st.session_state:
+        return st.session_state[_BT_NFO_KEY], st.session_state[_BT_STOCKS_KEY]
 
     try:
         nfo_df = pd.DataFrame(kite.instruments("NFO"))
         if nfo_df.empty:
-            result = (nfo_df, [])
-            st.session_state[cache_key] = result
-            return result
-        INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
-                       "BANKEX", "NIFTYNXT50", "NIFTY50", "CNXFINANCE"}
-        opt_stocks = nfo_df[
-            (nfo_df["segment"] == "NFO-OPT") &
-            (nfo_df["instrument_type"].isin(["CE", "PE"])) &
-            (~nfo_df["name"].isin(INDEX_NAMES))
-        ]["name"].dropna().unique().tolist()
-        result = (nfo_df, sorted(opt_stocks))
-        st.session_state[cache_key] = result
-        return result
+            st.session_state[_BT_NFO_KEY]    = pd.DataFrame()
+            st.session_state[_BT_STOCKS_KEY] = []
+            return pd.DataFrame(), []
+
+        opt_stocks = sorted(
+            nfo_df[
+                (nfo_df["segment"] == "NFO-OPT") &
+                (nfo_df["instrument_type"].isin(["CE", "PE"])) &
+                (~nfo_df["name"].isin(INDEX_NAMES))
+            ]["name"].dropna().unique().tolist()
+        )
+        st.session_state[_BT_NFO_KEY]    = nfo_df
+        st.session_state[_BT_STOCKS_KEY] = opt_stocks
+        return nfo_df, opt_stocks
+
     except Exception as e:
         st.error(f"Instrument fetch error: {e}")
         return pd.DataFrame(), []
 
+# Public helpers — always safe to call
+def fetch_instruments(kite):
+    """Returns (nfo_df, fno_stocks_list)."""
+    return _load_instruments(kite)
+
 def get_fno_stocks(kite) -> list:
-    """Return live F&O universe from Kite instruments."""
-    _, universe = fetch_instruments(kite)
-    return universe
+    """Returns live F&O stock universe as a sorted list."""
+    _, stocks = _load_instruments(kite)
+    return stocks
 
 # ─────────────────────────────────────────────
 # HELPERS
@@ -216,16 +226,6 @@ def get_atm_strike(price, step):
 def nearest_expiry_for_date(expiries, ref_date):
     future = [e for e in expiries if e >= ref_date]
     return min(future) if future else None
-
-# ─────────────────────────────────────────────
-# INSTRUMENTS (cached 1hr)
-# ─────────────────────────────────────────────
-@st.cache_data(ttl=86400)
-def fetch_instruments(_kite):
-    try:
-        return pd.DataFrame(_kite.instruments("NFO"))
-    except Exception as e:
-        return pd.DataFrame()
 
 # ─────────────────────────────────────────────
 # PREV TRADING DAY  (skip weekends simply)
