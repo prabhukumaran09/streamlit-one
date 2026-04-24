@@ -1,0 +1,17 @@
+# ── Streamlit secrets (NEVER commit this) ──
+.streamlit/secrets.toml
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── OS ──
+.DS_Store
+Thumbs.db
