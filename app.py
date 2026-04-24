@@ -23,6 +23,34 @@ def ist_str(fmt="%H:%M:%S") -> str:
     return now_ist().strftime(fmt)
 
 # ─────────────────────────────────────────────
+# MARKET HOURS HELPER
+# ─────────────────────────────────────────────
+MARKET_OPEN  = (9,  15)   # 9:15 AM IST
+MARKET_CLOSE = (15, 30)   # 3:30 PM IST
+
+def is_market_open() -> bool:
+    """Returns True if current IST time is within NSE trading hours (Mon–Fri, 9:15–15:30)."""
+    now = now_ist()
+    if now.weekday() >= 5:          # Saturday=5, Sunday=6
+        return False
+    t = (now.hour, now.minute)
+    return MARKET_OPEN <= t <= MARKET_CLOSE
+
+def market_status() -> tuple[bool, str]:
+    """Returns (is_open, status_message)."""
+    now = now_ist()
+    if now.weekday() >= 5:
+        return False, "🔴 Market Closed — Weekend"
+    t = (now.hour, now.minute)
+    if t < MARKET_OPEN:
+        opens_in = (MARKET_OPEN[0] * 60 + MARKET_OPEN[1]) - (now.hour * 60 + now.minute)
+        return False, f"🟡 Pre-Market — Opens in {opens_in} min"
+    if t > MARKET_CLOSE:
+        return False, "🔴 Market Closed — After Hours (15:30 IST)"
+    mins_left = (MARKET_CLOSE[0] * 60 + MARKET_CLOSE[1]) - (now.hour * 60 + now.minute)
+    return True, f"🟢 Market Open — Closes in {mins_left} min"
+
+# ─────────────────────────────────────────────
 # CSS
 # ─────────────────────────────────────────────
 st.markdown("""
@@ -134,6 +162,12 @@ section[data-testid="stSidebar"] label {
     border:1px solid #00e676; padding:2px 10px; border-radius:12px;
     font-size:0.65rem; letter-spacing:2px; font-weight:700;
     animation:blink 2s infinite; text-transform:uppercase;
+}
+.pill-closed {
+    display:inline-block; background:#1a0000; color:#ff5252;
+    border:1px solid #ff5252; padding:2px 10px; border-radius:12px;
+    font-size:0.65rem; letter-spacing:1px; font-weight:700;
+    text-transform:uppercase;
 }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
@@ -267,17 +301,21 @@ def camarilla_r4(high: float, low: float, close: float) -> float:
 # never needs manual updates.
 # Cached for 1 hour so it refreshes once per session.
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=86400)
-def fetch_instruments(_kite):
+@st.cache_resource(ttl=86400)
+def _load_instruments_cached(api_key: str, access_token: str):
     """
+    Fetches NFO instruments using explicit string args so
+    cache_resource can hash them reliably.
+    Cached 24hrs across ALL sessions — fetched only once per deploy.
     Returns (nfo_df, fno_universe_list).
-    Cached by Streamlit for 24 hours — uses _kite prefix so
-    Streamlit's cache treats it as an unhashed arg.
     """
     try:
-        nfo_df = pd.DataFrame(_kite.instruments("NFO"))
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        nfo_df = pd.DataFrame(kite.instruments("NFO"))
         if nfo_df.empty:
-            return nfo_df, []
+            return pd.DataFrame(), []
         INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
                        "BANKEX", "NIFTYNXT50", "NIFTY50", "CNXFINANCE"}
         opt_stocks = nfo_df[
@@ -290,11 +328,13 @@ def fetch_instruments(_kite):
         st.error(f"Instrument fetch error: {e}")
         return pd.DataFrame(), []
 
-# ─────────────────────────────────────────────
-# FNO_STOCKS — loaded dynamically at runtime
-# ─────────────────────────────────────────────
+def fetch_instruments(kite):
+    """Returns (nfo_df, fno_universe_list). Uses persistent cache."""
+    api_key, access_token = get_credentials()
+    return _load_instruments_cached(api_key, access_token)
+
 def get_fno_stocks(kite) -> list:
-    """Return live F&O universe. Uses @st.cache_data via fetch_instruments."""
+    """Return live F&O universe. Persistent across sessions."""
     _, universe = fetch_instruments(kite)
     return universe
 
@@ -702,6 +742,8 @@ def do_scan():
 clock_ph   = st.empty()
 last_upd   = st.session_state.last_scan.strftime("%d %b %Y  %H:%M:%S IST") \
              if st.session_state.last_scan else "—"
+_mkt_open, _mkt_msg = market_status()
+_pill_cls  = "pill-live" if _mkt_open else "pill-closed"
 clock_ph.markdown(f"""
 <div class="top-bar">
   <div>
@@ -713,7 +755,7 @@ clock_ph.markdown(f"""
   </div>
   <div style="text-align:center;">
     <div class="live-clock" id="ist-clock">{ist_str("%H:%M:%S")}</div>
-    <div class="clock-label">IST &nbsp; <span class="pill-live">● LIVE</span></div>
+    <div class="clock-label">IST &nbsp; <span class="{_pill_cls}">{_mkt_msg}</span></div>
   </div>
   <div style="text-align:right;">
     <div style="font-size:0.6rem;color:#546e7a;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">Last Scan</div>
@@ -792,6 +834,9 @@ if clear_btn:
 if scan_now:
     if not kite:
         st.error("⚠️  Please enter your Kite API Key and Access Token in the credentials panel above.")
+    elif not is_market_open():
+        _, _status = market_status()
+        st.warning(f"⚠️  {_status} — Live scan only runs between 9:15 AM and 3:30 PM IST on weekdays.")
     else:
         _ok, _msg = test_kite_connection(kite)
         if not _ok:
@@ -853,9 +898,19 @@ with right_col:
                  empty_msg="No PE options near R4.")
 
 # ─────────────────────────────────────────────
-# AUTO-REFRESH
+# AUTO-REFRESH  (only during market hours)
 # ─────────────────────────────────────────────
-if st.session_state.last_scan and kite:
+_mkt_open_now, _mkt_status_now = market_status()
+
+if not _mkt_open_now:
+    # Outside market hours — show status, no refresh loop
+    st.info(
+        f"**{_mkt_status_now}**\n\n"
+        "Auto-refresh is paused. The scanner will resume automatically "
+        "when market opens at **9:15 AM IST** on the next trading day."
+    )
+elif st.session_state.last_scan and kite:
+    # Inside market hours — normal refresh cycle
     elapsed   = (now_ist() - st.session_state.last_scan).total_seconds()
     wait_secs = refresh_mins * 60
     remaining = int(wait_secs - elapsed)
@@ -864,6 +919,6 @@ if st.session_state.last_scan and kite:
         do_scan()
         st.rerun()
     else:
-        st.caption(f"⏱ Next auto-refresh in {remaining // 60}m {remaining % 60}s  (IST)")
+        st.caption(f"⏱ Next auto-refresh in {remaining // 60}m {remaining % 60}s  (IST) · Market closes at 15:30 IST")
         time.sleep(min(30, remaining))
         st.rerun()
