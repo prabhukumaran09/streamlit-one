@@ -426,8 +426,20 @@ def get_stock_open(kite, symbol: str):
 # SCAN ONE STOCK
 # Returns breakout rows AND near-breakout rows
 # ─────────────────────────────────────────────
-def scan_stock(kite, nfo_df: pd.DataFrame, symbol: str, trigger_cache: dict) -> dict:
+def get_prev_trading_day():
+    """Get previous trading day (skip weekends)."""
+    prev = now_ist().date() - timedelta(days=1)
+    while prev.weekday() >= 5:  # Skip Saturday=5, Sunday=6
+        prev -= timedelta(days=1)
+    return prev
+
+def scan_stock(kite, nfo_df: pd.DataFrame, symbol: str, trigger_cache: dict, r4_cache: dict) -> dict:
     """
+    R4 Strategy:
+    - R4 is calculated ONCE per option per day using PREVIOUS day's last 15-min candle
+    - R4 remains constant throughout the trading day
+    - Cached in r4_cache with key = tradingsymbol
+    
     Returns:
         {
           "CE": {"breakout": [...], "near": [...]},
@@ -477,26 +489,53 @@ def scan_stock(kite, nfo_df: pd.DataFrame, symbol: str, trigger_cache: dict) -> 
             instrument_token = int(opt_row.iloc[0]["instrument_token"])
             cache_key        = tradingsymbol
 
-            # ── 5. 15-min candles ─────────────────────────────────────────
-            to_dt   = datetime.now()
-            from_dt = to_dt - timedelta(hours=3)
-            try:
-                hist = kite.historical_data(
-                    instrument_token,
-                    from_date=from_dt,
-                    to_date=to_dt,
-                    interval="15minute",
-                )
-            except Exception:
-                continue
+            # ── 5. Get or Calculate R4 (FIXED for entire day) ────────────
+            if cache_key in r4_cache:
+                # R4 already calculated for today — use cached value
+                r4 = r4_cache[cache_key]
+            else:
+                # Calculate R4 from PREVIOUS day's last 15-min candle
+                prev_day = get_prev_trading_day()
+                prev_from = datetime.combine(prev_day, datetime.min.time())
+                prev_to   = datetime.combine(prev_day, datetime.max.time())
+                
+                try:
+                    prev_candles = kite.historical_data(
+                        instrument_token,
+                        from_date=prev_from,
+                        to_date=prev_to,
+                        interval="15minute"
+                    )
+                except Exception:
+                    continue
 
-            if len(hist) < 2:
-                continue
+                if not prev_candles:
+                    # No previous day data — try using today's first candle as fallback
+                    # (e.g., new option listings, first day of expiry)
+                    now_ist_dt = now_ist()
+                    today_from = now_ist_dt.replace(hour=9, minute=0, second=0, microsecond=0)
+                    try:
+                        today_candles = kite.historical_data(
+                            instrument_token,
+                            from_date=today_from,
+                            to_date=now_ist_dt,
+                            interval="15minute"
+                        )
+                        if len(today_candles) < 2:
+                            continue  # Not enough data yet
+                        last = today_candles[-2]  # Last completed candle today
+                    except Exception:
+                        continue
+                else:
+                    # Use previous day's last candle
+                    last = prev_candles[-1]
 
-            last = hist[-2]   # last COMPLETED candle
-            r4   = camarilla_r4(last["high"], last["low"], last["close"])
-            if r4 <= 0:
-                continue
+                r4 = camarilla_r4(last["high"], last["low"], last["close"])
+                if r4 <= 0:
+                    continue
+                
+                # Cache R4 for rest of the day
+                r4_cache[cache_key] = r4
 
             # ── 6. Current LTP ────────────────────────────────────────────
             try:
@@ -561,7 +600,7 @@ def scan_stock(kite, nfo_df: pd.DataFrame, symbol: str, trigger_cache: dict) -> 
 # ─────────────────────────────────────────────
 # FULL SCAN
 # ─────────────────────────────────────────────
-def run_full_scan(kite, stocks: list, trigger_cache: dict) -> dict:
+def run_full_scan(kite, stocks: list, trigger_cache: dict, r4_cache: dict) -> dict:
     """
     Returns:
         {
@@ -581,7 +620,7 @@ def run_full_scan(kite, stocks: list, trigger_cache: dict) -> dict:
     total = len(stocks)
 
     for idx, symbol in enumerate(stocks):
-        stock_result = scan_stock(kite, nfo_df, symbol, trigger_cache)
+        stock_result = scan_stock(kite, nfo_df, symbol, trigger_cache, r4_cache)
         for opt_type in ["CE", "PE"]:
             result[opt_type]["breakout"].extend(stock_result[opt_type]["breakout"])
             result[opt_type]["near"].extend(stock_result[opt_type]["near"])
@@ -646,10 +685,24 @@ defaults = {
     "api_secret":    "",
     "access_token":  "",
     "trigger_cache": {},
+    "r4_cache":      {},
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ─────────────────────────────────────────────
+# AUTO-CLEAR R4 CACHE ON NEW TRADING DAY
+# R4 values should be recalculated fresh each day
+# ─────────────────────────────────────────────
+if "r4_cache_date" not in st.session_state:
+    st.session_state.r4_cache_date = None
+
+current_date = now_ist().date()
+if st.session_state.r4_cache_date != current_date:
+    # New trading day detected — clear R4 cache
+    st.session_state.r4_cache = {}
+    st.session_state.r4_cache_date = current_date
 
 # ─────────────────────────────────────────────
 # INLINE CREDENTIAL PANEL
@@ -782,7 +835,7 @@ if kite is not None:
 # ─────────────────────────────────────────────
 def do_scan():
     fno_stocks = get_fno_stocks(kite)
-    res = run_full_scan(kite, fno_stocks, st.session_state.trigger_cache)
+    res = run_full_scan(kite, fno_stocks, st.session_state.trigger_cache, st.session_state.r4_cache)
     # Apply min Chg% filter on breakouts
     if min_chg > 0:
         for t in ["CE", "PE"]:
@@ -891,6 +944,7 @@ if clear_btn:
     st.session_state.scan_result   = _empty_result()
     st.session_state.last_scan     = None
     st.session_state.trigger_cache = {}
+    st.session_state.r4_cache      = {}
     st.rerun()
 
 if scan_now:
